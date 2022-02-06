@@ -1,0 +1,143 @@
+version: "3"
+
+services:
+  setup:
+    build: setup
+    environment:
+      - CA_PASSWORD_FILE=/run/secrets/ca_provisioner_password
+    secrets:
+      - elastic_password
+      - ca_provisioner_password
+    volumes:
+      - type: bind
+        source: ./data/certificates
+        target: /run/secrets/certificates
+      - type: bind
+        source: ./entrypoints/wait-for
+        target: /usr/local/bin/wait-for
+    tty: true
+    command:
+      - /entrypoint.sh
+    networks:
+      - elasticnet
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_STACK_VERSION}
+    networks:
+      - elasticnet
+    environment:
+      - discovery.type=single-node
+      - xpack.license.self_generated.type=trial
+      - xpack.security.enabled=true
+      - xpack.security.authc.api_key.enabled=true
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=/usr/share/elasticsearch/config/elasticsearch.key
+      - xpack.security.http.ssl.certificate_authorities=/usr/share/elasticsearch/config/ca.crt
+      - xpack.security.http.ssl.certificate=/usr/share/elasticsearch/config/elasticsearch.crt
+      - ELASTIC_PASSWORD_FILE=/run/secrets/elastic_password
+      - CA_PASSWORD_FILE=/run/secrets/ca_provisioner_password
+    volumes:
+      - type: bind
+        source: ./data/certificates
+        target: /run/secrets/certificates
+      - type: bind
+        source: ./entrypoints/wait-for
+        target: /usr/local/bin/wait-for
+      - type: bind
+        source: ./entrypoints/elasticsearch-entrypoint.sh
+        target: /usr/local/bin/docker-entrypoint.sh
+    secrets:
+      - elastic_password
+      - ca_provisioner_password
+    ports:
+      - "9200:9200/tcp"
+    healthcheck:
+      test: curl --cacert /usr/share/elasticsearch/config/ca.crt -s https://localhost:9200 >/dev/null; if [[ $$? == 52 ]]; then echo 0; else echo 1; fi
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${ELASTIC_STACK_VERSION}
+    networks:
+      - elasticnet
+    environment:
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD_FILE=/run/secrets/elastic_password
+      - CA_PASSWORD_FILE=/run/secrets/ca_provisioner_password
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/ca.crt
+      - ELASTICSEARCH_HOSTS=https://elasticsearch:9200
+      - SERVER_SSL_CERTIFICATE=/usr/share/kibana/config/kibana.crt
+      - SERVER_SSL_KEY=/usr/share/kibana/config/kibana.key
+      - SERVER_SSL_ENABLED=true
+      - XPACK_SECURITY_ENCRYPTIONKEY_FILE
+    secrets:
+      - elastic_password
+      - ca_provisioner_password
+      - xpack_security_encryptionkey
+    depends_on:
+      - setup
+      - elasticsearch
+    ports:
+      - "5601:5601/tcp"
+    user: 0:0 # will drop in the entrypoint
+    volumes:
+      - type: bind
+        source: ./data/certificates
+        target: /run/secrets/certificates
+      - type: bind
+        source: ./entrypoints/kibana-docker
+        target: /usr/local/bin/kibana-docker
+      - type: bind
+        source: ./entrypoints/wait-for
+        target: /usr/local/bin/wait-for
+
+  fleet-server:
+    image: docker.elastic.co/beats/elastic-agent:${ELASTIC_STACK_VERSION}
+    user: 0:0 # will drop in the entrypoint
+    networks:
+      - elasticnet
+    environment:
+      - KIBANA_HOST=https://kibana:5601
+      - KIBANA_FLEET_SETUP=1
+      - FLEET_ENROLL=1
+      - FLEET_SERVER_ENABLE=true
+      - FLEET_SERVER_ELASTICSEARCH_HOST=https://elasticsearch:9200
+      - KIBANA_USERNAME=elastic
+      - ELASTICSEARCH_USERNAME=elastic
+      - KIBANA_PASSWORD_FILE=/run/secrets/elastic_password
+      - ELASTICSEARCH_PASSWORD_FILE=/run/secrets/elastic_password
+      - CA_PASSWORD_FILE=/run/secrets/ca_provisioner_password
+      - FLEET_SERVER_CERT=/usr/share/elastic-agent/config/fleet-server.crt
+      - FLEET_SERVER_CERT_KEY=/usr/share/elastic-agent/config/fleet-server.key
+      - FLEET_URL=https://fleet-server:8220/
+    ports:
+      - "8220:8220/tcp"
+    secrets:
+      - elastic_password
+      - ca_provisioner_password
+    depends_on:
+      - setup
+      - elasticsearch
+      - kibana
+    volumes:
+      - type: bind
+        source: ./data/certificates
+        target: /run/secrets/certificates
+      - type: bind
+        source: ./entrypoints/elastic-agent_entrypoint
+        target: /usr/local/bin/docker-entrypoint
+      - type: bind
+        source: ./entrypoints/wait-for
+        target: /usr/local/bin/wait-for
+
+secrets:
+  elastic_password:
+    file: ./secrets/elastic_password.txt
+  ca_provisioner_password:
+    file: ./secrets/ca_provisioner_password.txt
+  xpack_security_encryptionkey: # Must be at least 32 chars
+    file: ./secrets/xpack_security_encryptionkey.txt
+
+networks:
+  elasticnet:

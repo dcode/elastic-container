@@ -1,0 +1,80 @@
+#!/bin/bash
+
+set -eo pipefail
+
+# For information on the possible environment variables that can be passed into the container. Run the following
+# command for information on the options that are available.
+#
+# `./elastic-agent container --help`
+#
+
+## Allow for use for file-based secrets
+file_env() {
+    local var="$1"
+    local fileVar="${var}_FILE"
+    local def="${2:-}"
+
+    if [ "${!var:-}" ] && [ "${!fileVar:-}" ]; then
+        echo >&2 "error: both $var and $fileVar are set (but are exclusive)"
+        exit 1
+    fi
+    local val="$def"
+    if [ "${!var:-}" ]; then
+        val="${!var}"
+    elif [ "${!fileVar:-}" ]; then
+        val="$(<"${!fileVar}")"
+    fi
+    export "$var"="$val"
+    unset "$fileVar"
+}
+
+file_env "ELASTICSEARCH_PASSWORD"
+file_env "KIBANA_PASSWORD"
+
+
+# Install step for generating certificates
+pushd /tmp
+echo "I'm running as $(id)"
+curl -LOJ 'https://dl.step.sm/gh-release/cli/docs-cli-install/v0.18.1/step-cli_0.18.1_amd64.deb'
+dpkg -i ./step-cli*.deb
+rm -f ./step-cli*.deb
+
+# Trust root CA
+step certificate install /run/secrets/certificates/ca.crt
+
+echo "Waiting for Step ACME CA to be ready"
+wait-for --timeout=120 https://setup -- echo "Step ACME CA is ready!"
+step ca bootstrap --ca-url https://setup --fingerprint "$(step certificate fingerprint /run/secrets/certificates/ca.crt)"
+popd
+
+# Create certificates for Elasticsearch
+mkdir -p /usr/share/elastic-agent/config
+pushd /usr/share/elastic-agent/config
+cp /run/secrets/certificates/ca.crt ./ca.crt
+step ca certificate fleet-server fleet-server.crt fleet-server.key \
+  --acme https://setup/acme/acme/directory --force --standalone
+
+chown 1000:0 ca.crt fleet-server.crt fleet-server.key
+chmod 0600 ca.crt
+chmod 0600 fleet-server.crt fleet-server.key
+popd
+
+
+echo "Waiting for Elasticsearch to be ready"
+wait-for --timeout=120 https://elasticsearch:9200 -- echo "Elasticsearch is ready!"
+
+echo "Waiting for Kibana to be ready"
+wait-for --timeout=120 https://kibana:5601 -- echo "Kibana is ready!"
+
+run_as_other_user_if_needed() {
+  if [[ "$(id -u)" == "0" ]]; then
+    # If running as root, drop to specified UID and run command
+    exec chroot --userspec=1000:0 / "${@}"
+  else
+    # Either we are running in Openshift with random uid and are a member of the root group
+    # or with a custom --user
+    exec "${@}"
+  fi
+}
+
+run_as_other_user_if_needed elastic-agent container "$@"
