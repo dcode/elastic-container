@@ -6,7 +6,7 @@ ADD https://dl.step.sm/gh-release/certificates/docs-ca-install/v0.18.1/step-ca_0
 
 COPY entrypoint.sh /entrypoint.sh
 COPY configure-stack.sh /usr/local/bin/configure-stack.sh
-
+COPY wait-for /usr/local/bin/wait-for
 
 RUN apt update && \
     apt install -y jq p11-kit ca-certificates && \

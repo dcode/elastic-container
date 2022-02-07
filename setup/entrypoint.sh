@@ -18,3 +18,8 @@ nohup step-ca --password-file="${CA_PASSWORD_FILE}" "$(step path)/config/ca.json
 
 wait-for echo "Waiting for Elasticsearch to be ready"
 wait-for --timeout=120 https://elasticsearch:9200 -- echo "Elasticsearch is ready!"
+
+wait-for echo "Waiting for Kibana to be ready"
+wait-for --timeout=120 https://kibana:5601 -- echo "Kibana is ready!"
+
+# Kibana pops up before it's actually ready. Need to run stack configuration tools here
