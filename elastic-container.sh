@@ -120,8 +120,14 @@ OPTIND=1 # Reset in case getopts has been used previously in the shell.
 
 verbose=0
 
-while getopts "v" opt; do
+while getopts "ve:k:" opt; do
   case "$opt" in
+  e)
+    ELASTIC_URL="${OPTARG}"
+    ;;
+  k)
+    KIBANA_URL="${OPTARG}"
+    ;;
   v)
     verbose=1
     ;;

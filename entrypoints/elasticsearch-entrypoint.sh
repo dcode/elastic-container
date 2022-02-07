@@ -7,11 +7,11 @@ curl -LOJ 'https://dl.step.sm/gh-release/cli/docs-cli-install/v0.18.1/step-cli_0
 dpkg -i ./step-cli*.deb
 rm -f ./step-cli*.deb
 
-# Trust root CA
-step certificate install /run/secrets/certificates/ca.crt
-
 echo "Waiting for Step ACME CA to be ready"
 wait-for --timeout=120 https://setup -- echo "Step ACME CA is ready!"
+
+# Trust root CA
+step certificate install /run/secrets/certificates/ca.crt
 step ca bootstrap --ca-url https://setup --fingerprint "$(step certificate fingerprint /run/secrets/certificates/ca.crt)"
 popd
 

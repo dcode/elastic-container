@@ -6,7 +6,6 @@ services:
     environment:
       - CA_PASSWORD_FILE=/run/secrets/ca_provisioner_password
     secrets:
-      - elastic_password
       - ca_provisioner_password
     volumes:
       - type: bind
@@ -48,7 +47,6 @@ services:
         target: /usr/local/bin/docker-entrypoint.sh
     secrets:
       - elastic_password
-      - ca_provisioner_password
     ports:
       - "9200:9200/tcp"
     healthcheck:
@@ -73,7 +71,6 @@ services:
       - XPACK_SECURITY_ENCRYPTIONKEY_FILE
     secrets:
       - elastic_password
-      - ca_provisioner_password
       - xpack_security_encryptionkey
     depends_on:
       - setup
@@ -115,7 +112,6 @@ services:
       - "8220:8220/tcp"
     secrets:
       - elastic_password
-      - ca_provisioner_password
     depends_on:
       - setup
       - elasticsearch
