@@ -5,7 +5,7 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
     container_name: ecp-elasticsearch-security-setup
     volumes:
-      - certs:/usr/share/elasticsearch/config/certs
+      - certs:/usr/share/elasticsearch/config/certs:z
     user: "0"
     command: >
       bash -c '
@@ -31,6 +31,12 @@ services:
           "      - localhost\n"\
           "    ip:\n"\
           "      - 127.0.0.1\n"\
+          "  - name: logstash\n"\
+          "    dns:\n"\
+          "      - ecp-logstash\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
           "  - name: kibana\n"\
           "    dns:\n"\
           "      - ecp-kibana\n"\
@@ -43,6 +49,7 @@ services:
           "      - localhost\n"\
           "    ip:\n"\
           "      - 127.0.0.1\n"\
+          "  - name: elastic-agent\n"\
           > config/certs/instances.yml;
           bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;
           unzip config/certs/certs.zip -d config/certs;
@@ -50,10 +57,15 @@ services:
         fi;
         echo "Setting file permissions"
         chown -R root:root config/certs;
-        find . -type d -exec chmod 750 \{\} \;;
-        find . -type f -exec chmod 640 \{\} \;;
+        chown -R 1000:1000 config/certs/logstash;
+        openssl pkcs8 -inform PEM -in config/certs/logstash/logstash.key -topk8 -nocrypt -outform PEM -out config/certs/logstash/logstash.pkcs8.key
+        find . -type d -exec chmod 0755 \{\} \;;
+        find . -type f -exec chmod 0640 \{\} \;;
+        chmod 0644 config/certs/ca/ca.crt
         echo "Waiting for Elasticsearch availability";
         until curl -s --cacert config/certs/ca/ca.crt https://ecp-elasticsearch:9200 | grep -q "missing authentication credentials"; do sleep 30; done;
+        echo "Setting kibana_system password";
+        until curl -s -X POST --cacert config/certs/ca/ca.crt -u elastic:${ELASTIC_PASSWORD} -H "Content-Type: application/json" https://ecp-elasticsearch:9200/_security/user/logstash_system/_password -d "{\"password\":\"${LOGSTASH_PASSWORD}\"}" | grep -q "^{}"; do sleep 10; done;
         echo "Setting kibana_system password";
         until curl -s -X POST --cacert config/certs/ca/ca.crt -u elastic:${ELASTIC_PASSWORD} -H "Content-Type: application/json" https://ecp-elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 10; done;
         echo "All done!";
@@ -71,7 +83,7 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
     container_name: ecp-elasticsearch
     volumes:
-      - certs:/usr/share/elasticsearch/config/certs
+      - certs:/usr/share/elasticsearch/config/certs:z
       - esdata01:/usr/share/elasticsearch/data
     ports:
       - ${ES_PORT}:9200
@@ -110,6 +122,36 @@ services:
       timeout: 10s
       retries: 120
 
+  logstash:
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    image: docker.elastic.co/logstash/logstash:${STACK_VERSION}
+    container_name: ecp-logstash
+    volumes:
+      - certs:/usr/share/logstash/config/certs:z
+      - logstashdata:/usr/share/logstash/data
+      - ./pipeline:/usr/share/logstash/pipeline:ro,Z
+    ports:
+      - ${LS_PORT}:5044
+    environment:
+      - ELASTICSEARCH_HOSTS=https://ecp-elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=logstash_system
+      - ELASTICSEARCH_PASSWORD=${LOGSTASH_PASSWORD}
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
+      - LS_PORT=${LS_PORT}
+      - xpack.monitoring.enabled=false
+    mem_limit: ${MEM_LIMIT}
+    healthcheck:
+      test: [
+        "CMD-SHELL", 
+        "curl -I -s --cacert config/certs/ca/ca.crt https://localhost:9600/?pretty | grep -q 'version'",
+      ]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
   kibana:
     depends_on:
       elasticsearch:
@@ -117,9 +159,9 @@ services:
     image: docker.elastic.co/kibana/kibana:${STACK_VERSION}
     container_name: ecp-kibana
     volumes:
-      - certs:/usr/share/kibana/config/certs
+      - certs:/usr/share/kibana/config/certs:z
       - kibanadata:/usr/share/kibana/data
-      - ./kibana.yml:/usr/share/kibana/config/kibana.yml
+      - ./kibana.yml:/usr/share/kibana/config/kibana.yml:Z
     ports:
       - ${KIBANA_PORT}:5601
     environment:
@@ -152,7 +194,7 @@ services:
       image: docker.elastic.co/beats/elastic-agent:${STACK_VERSION}
       container_name: ecp-fleet-server
       volumes:
-        - certs:/certs
+        - certs:/certs:z
       ports:
         - ${FLEET_PORT}:8220
       restart: always
@@ -179,4 +221,6 @@ volumes:
   esdata01:
     driver: local
   kibanadata:
+    driver: local
+  logstashdata:
     driver: local

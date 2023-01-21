@@ -129,7 +129,7 @@ get_host_ip() {
 }
 
 set_fleet_values() {
-  fingerprint=$(docker compose exec -w /usr/share/elasticsearch/config/certs/ca elasticsearch cat ca.crt | openssl x509 -noout -fingerprint -sha256 | cut -d "=" -f 2 | tr -d :)
+  fingerprint=$(docker-compose exec -w /usr/share/elasticsearch/config/certs/ca elasticsearch cat ca.crt | openssl x509 -noout -fingerprint -sha256 | cut -d "=" -f 2 | tr -d :)
   printf '{"fleet_server_hosts": ["%s"]}' "https://${ipvar}:${FLEET_PORT}" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPUT "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/settings" -d @- | jq 
   printf '{"hosts": ["%s"]}' "https://${ipvar}:9200" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPUT "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/outputs/fleet-default-output" -d @- | jq 
   printf '{"ca_trusted_fingerprint": "%s"}' "${fingerprint}" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPUT "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/outputs/fleet-default-output" -d @- | jq 
@@ -182,6 +182,7 @@ case "${ACTION}" in
 "stage")
   # Collect the Elastic, Kibana, and Elastic-Agent Docker images
   docker pull "docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}"
+  docker pull "docker.elastic.co/logstash/logstash:${STACK_VERSION}"
   docker pull "docker.elastic.co/kibana/kibana:${STACK_VERSION}"
   docker pull "docker.elastic.co/beats/elastic-agent:${STACK_VERSION}"
   ;;
@@ -193,7 +194,7 @@ case "${ACTION}" in
 
   echo "Starting Elastic Stack network and containers"
 
-  docker compose up -d --no-deps
+  docker-compose up -d --no-deps
 
   configure_kbn 1>&2 2>&3
 
@@ -217,26 +218,26 @@ case "${ACTION}" in
 "stop")
   echo "Stopping running containers."
   
-  docker compose stop
+  docker-compose stop
   ;;
 
 "destroy")
   echo "#####"
   echo "Stopping and removing the containers, network, and volumes created."
   echo "#####"
-  docker compose down -v
+  docker-compose down -v
   ;;
 
 "restart")
   echo "#####"
   echo "Restarting all Elastic Stack components."
   echo "#####"
-  docker compose restart elasticsearch kibana fleet-server 2>&3
-  docker compose ps | grep -v setup
+  docker-compose restart elasticsearch logstash kibana fleet-server 2>&3
+  docker-compose ps | grep -v setup
   ;;
 
 "status")
-  docker compose ps | grep -v setup
+  docker-compose ps | grep -v setup
   ;;
 
 "clear")
